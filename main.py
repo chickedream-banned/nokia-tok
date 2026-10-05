@@ -102,16 +102,44 @@ def watch(url: str = Query(None), id: str = Query(None), src: str = Query(None))
     video_url = src
     video_id = id
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://www.tikwm.com/",
+        "Origin": "https://www.tikwm.com",
+        "Accept": "application/json, text/javascript, */*; q=0.01"
+    }
+
     if url:
-        try:
-            api_res = requests.post("https://www.tikwm.com/api/", data={"url": url}, timeout=8).json()
-            if api_res.get("code") == 0:
-                video_url = api_res["data"]["play"]
-                video_id = api_res["data"]["id"]
-            else:
-                raise HTTPException(status_code=400, detail="Ошибка API TikWM")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Ошибка: {e}")
+        clean_url = url.strip()
+        endpoints = [
+            "https://api.tikwm.com/api/",
+            "https://www.tikwm.com/api/"
+        ]
+        parsed_ok = False
+        last_err = "Неизвестная ошибка"
+
+        for ep in endpoints:
+            try:
+                res = requests.post(ep, data={"url": clean_url}, headers=headers, timeout=10)
+                if res.status_code == 200:
+                    try:
+                        api_res = res.json()
+                        if api_res.get("code") == 0 and "data" in api_res:
+                            video_url = api_res["data"].get("play")
+                            video_id = api_res["data"].get("id")
+                            parsed_ok = True
+                            break
+                        else:
+                            last_err = api_res.get("msg") or "Не удалось получить прямую ссылку"
+                    except Exception:
+                        last_err = f"Сервер вернул не JSON: {res.text[:80]}"
+                else:
+                    last_err = f"TikWM статус {res.status_code}"
+            except Exception as e:
+                last_err = str(e)
+
+        if not parsed_ok:
+            raise HTTPException(status_code=400, detail=f"Ошибка парсинга: {last_err}")
 
     if not video_url:
         raise HTTPException(status_code=400, detail="Нет ссылки на видео")
