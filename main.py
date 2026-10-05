@@ -102,43 +102,68 @@ def watch(url: str = Query(None), id: str = Query(None), src: str = Query(None))
     video_url = src
     video_id = id
 
-    headers = {
+    browser_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://www.tikwm.com/",
-        "Origin": "https://www.tikwm.com",
-        "Accept": "application/json, text/javascript, */*; q=0.01"
+        "Accept": "*/*"
     }
 
     if url:
         clean_url = url.strip()
-        endpoints = [
-            "https://api.tikwm.com/api/",
-            "https://www.tikwm.com/api/"
-        ]
         parsed_ok = False
-        last_err = "Неизвестная ошибка"
+        last_err = ""
 
-        for ep in endpoints:
-            try:
-                res = requests.post(ep, data={"url": clean_url}, headers=headers, timeout=10)
-                if res.status_code == 200:
-                    try:
-                        api_res = res.json()
-                        if api_res.get("code") == 0 and "data" in api_res:
-                            video_url = api_res["data"].get("play")
-                            video_id = api_res["data"].get("id")
-                            parsed_ok = True
+        # ПРОВАЙДЕР 1: LoveTik (отлично работает с дата-центров)
+        try:
+            r = requests.post(
+                "https://lovetik.com/api/ajax/search",
+                data={"query": clean_url},
+                headers=browser_headers,
+                timeout=10
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("status") == "ok" and data.get("links"):
+                    video_id = data.get("vid")
+                    # Ищем ссылку без водяного знака
+                    for link in data.get("links", []):
+                        t_label = link.get("t", "").lower()
+                        if "watermark" in t_label and "no" in t_label:
+                            video_url = link.get("a")
                             break
-                        else:
-                            last_err = api_res.get("msg") or "Не удалось получить прямую ссылку"
-                    except Exception:
-                        last_err = f"Сервер вернул не JSON: {res.text[:80]}"
+                        if not video_url and link.get("a"):
+                            video_url = link.get("a")
+                    if video_url:
+                        parsed_ok = True
                 else:
-                    last_err = f"TikWM статус {res.status_code}"
+                    last_err = data.get("mess") or "LoveTik не нашел видео"
+            else:
+                last_err = f"LoveTik статус {r.status_code}"
+        except Exception as e:
+            last_err = f"LoveTik сбой: {e}"
+
+        # ПРОВАЙДЕР 2: Запасной эндпоинт, если LoveTik дал осечку
+        if not parsed_ok:
+            try:
+                r2 = requests.post(
+                    "https://api.tikwm.com/api/",
+                    data={"url": clean_url},
+                    headers={**browser_headers, "Referer": "https://www.tikwm.com/"},
+                    timeout=8
+                )
+                if r2.status_code == 200:
+                    data2 = r2.json()
+                    if data2.get("code") == 0 and "data" in data2:
+                        video_url = data2["data"].get("play")
+                        video_id = data2["data"].get("id")
+                        parsed_ok = True
+                    else:
+                        last_err = data2.get("msg") or last_err
+                else:
+                    last_err = f"TikWM статус {r2.status_code}"
             except Exception as e:
                 last_err = str(e)
 
-        if not parsed_ok:
+        if not parsed_ok or not video_url:
             raise HTTPException(status_code=400, detail=f"Ошибка парсинга: {last_err}")
 
     if not video_url:
@@ -149,6 +174,7 @@ def watch(url: str = Query(None), id: str = Query(None), src: str = Query(None))
 
     output_file = os.path.join(CACHE_DIR, f"{video_id}.3gp")
 
+    # Конвертируем только если ролик еще не закэширован
     if not os.path.exists(output_file):
         ok = transcode_to_3gp(video_url, output_file)
         if not ok or not os.path.exists(output_file):
