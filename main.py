@@ -32,23 +32,42 @@ def transcode_to_3gp(input_url: str, output_path: str):
 @app.get("/", response_class=HTMLResponse)
 def index():
     feed_html = ""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://www.tikwm.com/",
+        "Origin": "https://www.tikwm.com",
+        "Accept": "application/json, text/javascript, */*; q=0.01"
+    }
+
     try:
-        r = requests.get("https://www.tikwm.com/api/feed/list?region=US", timeout=6)
+        # Пробуем дернуть ленту трендов
+        r = requests.get("https://www.tikwm.com/api/feed/list?region=US&count=10", headers=headers, timeout=7)
+        print(f"[TikWM Feed] Status: {r.status_code}, Body preview: {r.text[:120]}")
+
         if r.status_code == 200:
-            data = r.json().get("data", [])
-            for item in data[:8]:
-                title = item.get("title", "Без названия")[:35]
-                vid_id = item.get("video_id")
-                play_url = item.get("play")
-                if vid_id and play_url:
-                    feed_html += f"""
-                    <div style="border-bottom:1px solid #ccc; padding:4px 0;">
-                        <div><b>{title}</b></div>
-                        <a href="/watch?id={vid_id}&src={requests.utils.quote(play_url)}">[Смотреть 3GP]</a>
-                    </div>
-                    """
-    except Exception:
-        feed_html = "<div>Не удалось подтянуть тренды. Вставь ссылку вручную.</div>"
+            res_json = r.json()
+            items = res_json.get("data", [])
+            if isinstance(items, list) and len(items) > 0:
+                for item in items[:10]:
+                    title = item.get("title") or "Без названия"
+                    title = title[:35]
+                    vid_id = item.get("video_id") or item.get("id")
+                    play_url = item.get("play")
+                    if vid_id and play_url:
+                        feed_html += f"""
+                        <div style="border-bottom:1px solid #ccc; padding:4px 0;">
+                            <div><b>{title}</b></div>
+                            <a href="/watch?id={vid_id}&src={requests.utils.quote(play_url)}">[Смотреть 3GP]</a>
+                        </div>
+                        """
+            else:
+                feed_html = "<div style='color:#777; font-size:11px;'>Сервер вернул пустой список видео.</div>"
+        else:
+            feed_html = f"<div style='color:#c00; font-size:11px;'>TikWM вернул ошибку {r.status_code} (блок дата-центра).</div>"
+
+    except Exception as e:
+        print(f"[TikWM Error] {e}")
+        feed_html = f"<div style='color:#777; font-size:11px;'>Сбой сети: {str(e)[:30]}</div>"
 
     return f"""<!DOCTYPE html>
 <html>
@@ -69,15 +88,15 @@ def index():
     <div class="box">
         <form action="/watch" method="GET">
             <b>Ссылка на TikTok:</b><br>
-            <input type="text" name="url" placeholder="https://vm.tiktok.com/..."><br>
+            <input type="text" name="url" placeholder="https://vt.tiktok.com/..."><br>
             <input type="submit" value="Конвертировать">
         </form>
     </div>
-    <b>Тренды:</b>
+    <b>Лента трендов:</b>
     {feed_html}
 </body>
 </html>"""
-
+    
 @app.get("/watch")
 def watch(url: str = Query(None), id: str = Query(None), src: str = Query(None)):
     video_url = src
