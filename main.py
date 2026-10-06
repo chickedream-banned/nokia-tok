@@ -14,7 +14,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 FFMPEG_BIN = imageio_ffmpeg.get_ffmpeg_exe()
 
 # ВСТАВЬ СЮДА ССЫЛКУ НА СВОЙ CLOUDFLARE WORKER
-CF_WORKER_URL = "https://tiktok-bridge.bozhkogleb4.workers.dev"
+CF_WORKER_URL = "https://tiktok-bridge.bozhkogleb4.workers.dev/"
 
 FEED_CACHE = []
 
